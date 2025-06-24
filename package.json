@@ -1,13 +1,20 @@
-import { ReactNode } from "react";
-
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={\`border rounded-lg shadow-md p-4 bg-white \${className}\`}>
-      {children}
-    </div>
-  );
-}
-
-export function CardContent({ children }: { children: ReactNode }) {
-  return <div>{children}</div>;
+{
+  "name": "mlb-error-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.1.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.2",
+    "@types/react": "^18.2.46",
+    "@types/node": "^20.11.30"
+  }
 }
