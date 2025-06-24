@@ -4,28 +4,33 @@ import { useEffect, useState } from "react";
 import { Card, CardContent } from "../components/ui/card";
 
 export default function MLBErrorTracker() {
-  const [errors, setErrors] = useState([]);
+  const [liveErrors, setLiveErrors] = useState([]);
+  const [yesterdayErrors, setYesterdayErrors] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  useEffect(() => {
-    const seen = new Set();
+  function getDateString(offset = 0) {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().split("T")[0];
+  }
 
-    async function fetchLiveGames() {
-      const scheduleRes = await fetch(
-        "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=today"
+  useEffect(() => {
+    const seenLive = new Set();
+    const seenYesterday = new Set();
+
+    async function fetchGames(date) {
+      const res = await fetch(
+        `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${date}`
       );
-      const schedule = await scheduleRes.json();
-      const games = schedule?.dates?.[0]?.games || [];
-      return games
-        .filter((g) => g.status.abstractGameState !== "Final")
-        .map((g) => ({
-          id: g.gamePk,
-          home: g.teams.home.team.name,
-          away: g.teams.away.team.name
-        }));
+      const json = await res.json();
+      return json?.dates?.[0]?.games?.map((g) => ({
+        id: g.gamePk,
+        home: g.teams.home.team.name,
+        away: g.teams.away.team.name,
+      })) || [];
     }
 
-    async function checkErrors(game) {
+    async function checkErrors(game, seenSet) {
       const url = `https://statsapi.mlb.com/api/v1.1/game/${game.id}/feed/live`;
       const res = await fetch(url);
       const data = await res.json();
@@ -36,11 +41,11 @@ export default function MLBErrorTracker() {
         const event = play.result.event?.toLowerCase() || "";
         return (
           (desc.includes("error") || event.includes("error")) &&
-          !seen.has(play.playId)
+          !seenSet.has(play.playId)
         );
       });
 
-      newErrors.forEach((play) => seen.add(play.playId));
+      newErrors.forEach((play) => seenSet.add(play.playId));
 
       return newErrors.map((play) => ({
         id: play.playId,
@@ -48,28 +53,53 @@ export default function MLBErrorTracker() {
         description: play.result.description,
         game: `${game.away} @ ${game.home}`,
         time: new Date(play.about.startTime).toLocaleTimeString(),
-        batter: play.matchup?.batter?.fullName || "Unknown"
+        batter: play.matchup?.batter?.fullName || "Unknown",
       }));
     }
 
     async function pollErrors() {
-      const games = await fetchLiveGames();
-      let allErrors = [];
-      for (const game of games) {
-        const errs = await checkErrors(game);
-        allErrors = [...allErrors, ...errs];
+      const today = getDateString(0);
+      const yesterday = getDateString(-1);
+
+      const [liveGames, ydayGames] = await Promise.all([
+        fetchGames(today),
+        fetchGames(yesterday),
+      ]);
+
+      let newLiveErrors = [];
+      for (const game of liveGames) {
+        const errors = await checkErrors(game, seenLive);
+        newLiveErrors = [...newLiveErrors, ...errors];
       }
-      if (allErrors.length > 0) {
-        setErrors((prev) => [...allErrors, ...prev]);
-        setLastUpdated(new Date().toLocaleTimeString());
+
+      let newYdayErrors = [];
+      for (const game of ydayGames) {
+        const errors = await checkErrors(game, seenYesterday);
+        newYdayErrors = [...newYdayErrors, ...errors];
       }
+
+      if (newLiveErrors.length > 0) setLiveErrors((prev) => [...newLiveErrors, ...prev]);
+      if (newYdayErrors.length > 0) setYesterdayErrors((prev) => [...newYdayErrors, ...prev]);
+      setLastUpdated(new Date().toLocaleTimeString());
     }
 
     const interval = setInterval(pollErrors, 30000);
-    pollErrors(); // Initial call
+    pollErrors();
 
     return () => clearInterval(interval);
   }, []);
+
+  const renderErrors = (errors) =>
+    errors.map((error) => (
+      <Card key={error.id} className="mb-2">
+        <CardContent>
+          <p className="font-semibold">Game: {error.game}</p>
+          <p className="text-sm text-gray-600">Time: {error.time}</p>
+          <p className="text-sm text-gray-600">Batter: {error.batter}</p>
+          <p className="mt-2">{error.description}</p>
+        </CardContent>
+      </Card>
+    ));
 
   return (
     <div className="max-w-2xl mx-auto p-4">
@@ -79,20 +109,11 @@ export default function MLBErrorTracker() {
           Last checked at {lastUpdated}
         </p>
       )}
-      {errors.length === 0 ? (
-        <p>No errors yet today! Check back soon.</p>
-      ) : (
-        errors.map((error) => (
-          <Card key={error.id} className="mb-2">
-            <CardContent>
-              <p className="font-semibold">Game: {error.game}</p>
-              <p className="text-sm text-gray-600">Time: {error.time}</p>
-              <p className="text-sm text-gray-600">Batter: {error.batter}</p>
-              <p className="mt-2">{error.description}</p>
-            </CardContent>
-          </Card>
-        ))
-      )}
+      <h2 className="text-xl font-semibold mt-6 mb-2">Live Games (Today)</h2>
+      {liveErrors.length === 0 ? <p>No errors yet today.</p> : renderErrors(liveErrors)}
+
+      <h2 className="text-xl font-semibold mt-6 mb-2">Yesterday’s Games</h2>
+      {yesterdayErrors.length === 0 ? <p>No errors yesterday.</p> : renderErrors(yesterdayErrors)}
     </div>
   );
 }
