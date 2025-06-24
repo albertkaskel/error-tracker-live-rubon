@@ -18,11 +18,15 @@ export default function MLBErrorTracker() {
       const games = schedule?.dates?.[0]?.games || [];
       return games
         .filter((g) => g.status.abstractGameState !== "Final")
-        .map((g) => g.gamePk);
+        .map((g) => ({
+          id: g.gamePk,
+          home: g.teams.home.team.name,
+          away: g.teams.away.team.name
+        }));
     }
 
-    async function checkErrors(gamePk) {
-      const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
+    async function checkErrors(game) {
+      const url = `https://statsapi.mlb.com/api/v1.1/game/${game.id}/feed/live`;
       const res = await fetch(url);
       const data = await res.json();
       const allPlays = data?.liveData?.plays?.allPlays || [];
@@ -42,14 +46,17 @@ export default function MLBErrorTracker() {
         id: play.playId,
         inning: play.about.inning,
         description: play.result.description,
+        game: `${game.away} @ ${game.home}`,
+        time: new Date(play.about.startTime).toLocaleTimeString(),
+        batter: play.matchup?.batter?.fullName || "Unknown"
       }));
     }
 
     async function pollErrors() {
-      const gamePks = await fetchLiveGames();
+      const games = await fetchLiveGames();
       let allErrors = [];
-      for (const pk of gamePks) {
-        const errs = await checkErrors(pk);
+      for (const game of games) {
+        const errs = await checkErrors(game);
         allErrors = [...allErrors, ...errs];
       }
       if (allErrors.length > 0) {
@@ -78,8 +85,10 @@ export default function MLBErrorTracker() {
         errors.map((error) => (
           <Card key={error.id} className="mb-2">
             <CardContent>
-              <p className="font-semibold">Inning: {error.inning}</p>
-              <p>{error.description}</p>
+              <p className="font-semibold">Game: {error.game}</p>
+              <p className="text-sm text-gray-600">Time: {error.time}</p>
+              <p className="text-sm text-gray-600">Batter: {error.batter}</p>
+              <p className="mt-2">{error.description}</p>
             </CardContent>
           </Card>
         ))
